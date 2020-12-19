@@ -13,27 +13,27 @@ def compute_propensity_scores(dataset, group_masks, confounder_cols):
     Parameters
     ----------
     dataset : pd.DataFrame
-        The dataset from which the two groups are drawn.
-    group_masks : list of pd.Series
-        A list of boolean masks identifying members of each group.
+        The dataset from which the groups are drawn.
+    group_masks : dict of pd.Series
+        A dict of boolean masks identifying members of each group.
     confounder_cols : list of str
         The labels of the dataset columns corresponding to confounders.
         
     Returns
     -------
-    group_data : pd.DataFrame
-        The treatment and control groups.
+    propensity_scores : pd.DataFrame
+        The propensity scores, where each column is for a group.
     """
-    groups = [dataset[group_mask].copy() for group_mask in group_masks]
+    groups = [dataset[group_mask].copy() for _, group_mask in group_masks.items()]
     for i, group in enumerate(groups):
         group['treatment'] = i
     group_data = pd.concat(groups)
     X_train, y_train = group_data[confounder_cols], group_data['treatment']
     
     propensity_model = sklearn.linear_model.LogisticRegression().fit(X_train, y_train)
-    group_data['propensity_scores'] = list(propensity_model.predict_proba(X_train))
+    propensity_scores = propensity_model.predict_proba(X_train)
     
-    return group_data
+    return pd.DataFrame(propensity_scores, columns=group_masks.keys())
 
 def psm(dataset, group_masks, confounder_cols, max_caliper=0.2):
     """Perform propensity score caliper matching between the treatment and control groups.
@@ -42,8 +42,8 @@ def psm(dataset, group_masks, confounder_cols, max_caliper=0.2):
     ----------
     dataset : pd.DataFrame
         The dataset from which the two groups are drawn.
-    group_masks : list of pd.Series
-        A list of boolean masks identifying members of each group.
+    group_masks : dict of pd.Series
+        A dict of boolean masks identifying members of each group.
     confounder_cols : list of str
         The labels of the dataset columns corresponding to confounders.
     max_caliper : float
@@ -55,11 +55,11 @@ def psm(dataset, group_masks, confounder_cols, max_caliper=0.2):
         A list of ordered pairs of index values for respectively the treatment and control groups.
     """
     
-    group_data = compute_propensity_scores(dataset, group_masks, confounder_cols)
+    propensity_scores = compute_propensity_scores(dataset, group_masks, confounder_cols)
     
     matches = []
     
-    groups = [group_data[group_data['treatment'] == i] for i in group_data['treatment'].unique()]
+    groups = [pd.concat([dataset[group_mask].copy(), propensity_scores[group_name]], axis=1, keys=[dataset.keys, 'propensity_scores']) for group_name, group_mask in group_masks.items()]
     
     indices = np.argsort([len(group) for group in groups])
     groups = sorted(groups, key=len)
